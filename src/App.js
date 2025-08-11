@@ -7,6 +7,7 @@ import Register from './pages/Register';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import Header from './components/Header';
 
 // Create a theme instance
 const theme = createTheme({
@@ -48,29 +49,32 @@ function App() {
       <CssBaseline />
       <AuthProvider>
         <Router>
-          <Routes>
-            <Route path="/login" element={
-              <PublicRoute>
-                <Login />
-              </PublicRoute>
-            } />
-            <Route path="/register" element={
-              <PublicRoute>
-                <Register />
-              </PublicRoute>
-            } />
-            <Route path="/dashboard" element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            } />
-            <Route path="/profile" element={
-              <ProtectedRoute>
-                <Profile />
-              </ProtectedRoute>
-            } />
-            <Route path="/" element={<Navigate to="/dashboard" />} />
-          </Routes>
+          {/* Global Header for authenticated routes */}
+          <HeaderWrapper>
+            <Routes>
+              <Route path="/login" element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              } />
+              <Route path="/register" element={
+                <PublicRoute>
+                  <Register />
+                </PublicRoute>
+              } />
+              <Route path="/dashboard" element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile" element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              <Route path="/" element={<Navigate to="/dashboard" />} />
+            </Routes>
+          </HeaderWrapper>
         </Router>
       </AuthProvider>
     </ThemeProvider>
@@ -78,3 +82,15 @@ function App() {
 }
 
 export default App;
+
+// Render header only when authenticated and not on public routes
+function HeaderWrapper({ children }) {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return children;
+  return (
+    <>
+      {isAuthenticated && <Header />}
+      {children}
+    </>
+  );
+}

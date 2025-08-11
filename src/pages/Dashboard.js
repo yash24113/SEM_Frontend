@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Box,
@@ -15,7 +15,13 @@ import {
   Alert,
   CircularProgress,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Switch,
+  FormControlLabel,
+  Select,
+  MenuItem as MuiMenuItem,
+  InputLabel,
+  FormControl
 } from '@mui/material';
 import {
   Thermostat,
@@ -55,6 +61,9 @@ const Dashboard = () => {
   const [timeRange, setTimeRange] = useState('24h');
   const [socket, setSocket] = useState(null);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [updateIntervalMs, setUpdateIntervalMs] = useState(30000);
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     // Initialize Socket.IO connection
@@ -85,11 +94,28 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData({ silent: false });
   }, [timeRange]);
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  // Auto update interval handling
+  useEffect(() => {
+    if (autoUpdate) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => {
+        // Silent refresh to avoid spinner flicker
+        fetchDashboardData({ silent: true });
+      }, updateIntervalMs);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [autoUpdate, updateIntervalMs, timeRange]);
+
+  const fetchDashboardData = async ({ silent } = { silent: false }) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const results = await Promise.allSettled([
@@ -166,7 +192,7 @@ const Dashboard = () => {
       console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -310,40 +336,61 @@ const Dashboard = () => {
   }
 
   return (
-    <Container maxWidth="xl" sx={{ py: 3 }}>
+    <Container maxWidth="xl" sx={{ py: { xs: 2, md: 3 } }}>
       {/* Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Box>
-          <Typography variant="h4" gutterBottom>
-            Smart Environment Monitor
-          </Typography>
-          <Typography variant="body1" color="textSecondary">
-            Welcome back, {user?.name || 'User'}! Here's your environment overview.
-          </Typography>
-        </Box>
-        
-        <Box display="flex" alignItems="center" gap={2}>
-          <ToggleButtonGroup
-            value={timeRange}
-            exclusive
-            onChange={(e, newValue) => newValue && setTimeRange(newValue)}
-            size="small"
-          >
-            <ToggleButton value="1h">1H</ToggleButton>
-            <ToggleButton value="24h">24H</ToggleButton>
-            <ToggleButton value="7d">7D</ToggleButton>
-            <ToggleButton value="30d">30D</ToggleButton>
-          </ToggleButtonGroup>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+        <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} flexDirection={{ xs: 'column', md: 'row' }} gap={{ xs: 2, md: 0 }} mb={3}>
+          <Box>
+            <Typography variant="h4" gutterBottom>
+              Smart Environment Monitor
+            </Typography>
+            <Typography variant="body1" color="textSecondary">
+              Welcome back, {user?.name || 'User'}! Here's your environment overview.
+            </Typography>
+          </Box>
           
-          <IconButton onClick={fetchDashboardData} disabled={loading}>
-            <Refresh />
-          </IconButton>
-          
-          <IconButton onClick={handleMenuOpen}>
-            <MoreVert />
-          </IconButton>
+          <Box display="flex" alignItems={{ xs: 'stretch', md: 'center' }} gap={2} flexWrap="wrap">
+            <FormControlLabel
+              control={<Switch checked={autoUpdate} onChange={(e) => setAutoUpdate(e.target.checked)} />}
+              label="Auto Update"
+            />
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel id="update-interval-label">Interval</InputLabel>
+              <Select
+                labelId="update-interval-label"
+                value={updateIntervalMs}
+                label="Interval"
+                onChange={(e) => setUpdateIntervalMs(Number(e.target.value))}
+                disabled={!autoUpdate}
+              >
+                <MuiMenuItem value={15000}>15s</MuiMenuItem>
+                <MuiMenuItem value={30000}>30s</MuiMenuItem>
+                <MuiMenuItem value={60000}>1m</MuiMenuItem>
+                <MuiMenuItem value={300000}>5m</MuiMenuItem>
+              </Select>
+            </FormControl>
+            <ToggleButtonGroup
+              value={timeRange}
+              exclusive
+              onChange={(e, newValue) => newValue && setTimeRange(newValue)}
+              size="small"
+            >
+              <ToggleButton value="1h">1H</ToggleButton>
+              <ToggleButton value="24h">24H</ToggleButton>
+              <ToggleButton value="7d">7D</ToggleButton>
+              <ToggleButton value="30d">30D</ToggleButton>
+            </ToggleButtonGroup>
+            
+            <IconButton onClick={() => fetchDashboardData({ silent: false })} disabled={loading}>
+              <Refresh />
+            </IconButton>
+            
+            <IconButton onClick={handleMenuOpen}>
+              <MoreVert />
+            </IconButton>
+          </Box>
         </Box>
-      </Box>
+      </motion.div>
 
       <Menu
         anchorEl={anchorEl}
@@ -363,7 +410,7 @@ const Dashboard = () => {
       )}
 
       {/* Sensor Cards */}
-      <Grid container spacing={3} mb={3}>
+      <Grid container spacing={{ xs: 2, md: 3 }} mb={{ xs: 2, md: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
           <AnimatedSensorCard
             title="Temperature"
@@ -419,9 +466,9 @@ const Dashboard = () => {
       </Grid>
 
       {/* Charts */}
-      <Grid container spacing={3}>
+      <Grid container spacing={{ xs: 2, md: 3 }}>
         <Grid item xs={12} lg={8}>
-          <Paper sx={{ p: 3, height: 400 }}>
+          <Paper sx={{ p: { xs: 2, md: 3 }, height: { xs: 300, md: 400 } }}>
             <Typography variant="h6" gutterBottom>
               Temperature & Humidity Trends
             </Typography>
@@ -456,7 +503,7 @@ const Dashboard = () => {
         </Grid>
         
         <Grid item xs={12} lg={4}>
-          <Paper sx={{ p: 3, height: 400 }}>
+          <Paper sx={{ p: { xs: 2, md: 3 }, height: { xs: 300, md: 400 } }}>
             <Typography variant="h6" gutterBottom>
               Air Quality Index
             </Typography>
