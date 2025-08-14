@@ -41,7 +41,10 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { profileAPI } from '../services/api';
+import { profileAPI, twoFAAPI } from '../services/api';
+import ConfirmationModal from '../components/ConfirmationModal';
+
+const TWO_FA_TOKEN_KEY = 'twofa_token';
 
 const Profile = () => {
   const { user, updateUser, logout } = useAuth();
@@ -59,6 +62,8 @@ const Profile = () => {
   
   const [passwordDialog, setPasswordDialog] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -82,28 +87,86 @@ const Profile = () => {
     confirm: false
   });
 
+  // 2FA state
+  const [twoFAEnabled, setTwoFAEnabled] = useState(user?.profile?.twoFAEnabled || false);
+  const [twoFASetup, setTwoFASetup] = useState(null); // { qr, secret }
+  const [twoFACode, setTwoFACode] = useState('');
+  const [twoFAError, setTwoFAError] = useState('');
+  const [twoFALoading, setTwoFALoading] = useState(false);
+
   useEffect(() => {
     fetchProfile();
   }, []);
+
+  // Setup effect to load profile data
+  useEffect(() => {
+    // If we already have user data, use it to populate the form
+    if (user) {
+      setProfile(user);
+      setFormData({
+        name: user.name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        bio: user.profile?.bio || '',
+        location: user.profile?.location || '',
+        temperatureUnit: user.profile?.preferences?.temperatureUnit || 'celsius',
+        notifications: user.profile?.preferences?.notifications !== false
+      });
+    }
+    
+    // Then fetch the latest profile data
+    fetchProfile();
+  }, [user]); // Add user to dependency array to update if user data changes
 
   const fetchProfile = async () => {
     try {
       setLoading(true);
       const response = await profileAPI.getProfile();
       const userProfile = response.data;
-      setProfile(userProfile);
-      setFormData({
-        name: userProfile.name || '',
-        email: userProfile.email || '',
-        phone: userProfile.phone || '',
-        bio: userProfile.profile?.bio || '',
-        location: userProfile.profile?.location || '',
-        temperatureUnit: userProfile.profile?.preferences?.temperatureUnit || 'celsius',
-        notifications: userProfile.profile?.preferences?.notifications !== false
-      });
+      
+      console.log('Fetched profile data:', userProfile); // Debug log
+      
+      // If no response data, use the user data from auth context
+      if (!userProfile && user) {
+        setProfile(user);
+        setFormData({
+          name: user.name || '',
+          email: user.email || '',
+          phone: user.phone || '',
+          bio: user.profile?.bio || '',
+          location: user.profile?.location || '',
+          temperatureUnit: user.profile?.preferences?.temperatureUnit || 'celsius',
+          notifications: user.profile?.preferences?.notifications !== false
+        });
+      } else {
+        setProfile(userProfile);
+        setFormData({
+          name: userProfile.name || '',
+          email: userProfile.email || '',
+          phone: userProfile.phone || '',
+          bio: userProfile.profile?.bio || '',
+          location: userProfile.profile?.location || '',
+          temperatureUnit: userProfile.profile?.preferences?.temperatureUnit || 'celsius',
+          notifications: userProfile.profile?.preferences?.notifications !== false
+        });
+      }
     } catch (err) {
       console.error('Error fetching profile:', err);
-      setError('Failed to load profile');
+      // If there's an error but we have user data from auth context, use that
+      if (user) {
+        setProfile(user);
+        setFormData({
+          name: user.name || '',
+          email: user.email || '',
+          phone: user.phone || '',
+          bio: user.profile?.bio || '',
+          location: user.profile?.location || '',
+          temperatureUnit: user.profile?.preferences?.temperatureUnit || 'celsius',
+          notifications: user.profile?.preferences?.notifications !== false
+        });
+      } else {
+        setError('Failed to load profile');
+      }
     } finally {
       setLoading(false);
     }
@@ -127,17 +190,23 @@ const Profile = () => {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
+    setShowUpdateModal(true);
+  };
+
+  // State for 2FA verification
+  const [show2FAModal, setShow2FAModal] = useState(false);
+
+  const [pendingUpdateData, setPendingUpdateData] = useState(null);
+
+
+  const handleConfirmUpdate = async () => {
     try {
       setSaving(true);
       setError(null);
+      setTwoFAError('');
       
-      // Upload avatar if changed
-      if (avatarFile) {
-        await profileAPI.uploadAvatar(avatarFile);
-      }
-      
-      // Update profile
+      // Prepare update data
       const updateData = {
         name: formData.name,
         phone: formData.phone,
@@ -151,16 +220,43 @@ const Profile = () => {
         }
       };
       
-      const response = await profileAPI.updateProfile(updateData);
-      setProfile(response.data);
-      updateUser(response.data);
+      // Store the update data for later use if 2FA is required
+      setPendingUpdateData(updateData);
       
-      setEditMode(false);
-      setAvatarFile(null);
-      setAvatarPreview(null);
-      setSuccess('Profile updated successfully');
-      
-      setTimeout(() => setSuccess(null), 3000);
+      // Try to update profile without 2FA first
+      try {
+        const response = await profileAPI.updateProfile(updateData);
+        
+        // If we get here, 2FA is not required
+        if (avatarFile) {
+          await profileAPI.uploadAvatar(avatarFile);
+        }
+        
+        setProfile(response.data);
+        updateUser(response.data);
+        
+        setEditMode(false);
+        setAvatarFile(null);
+        setAvatarPreview(null);
+        setSuccess('Profile updated successfully');
+        
+        setTimeout(() => setSuccess(null), 3000);
+        setShowUpdateModal(false);
+      } catch (err) {
+        // If 2FA is required, redirect to 2FA page
+        if (err.response?.data?.requires2FA) {
+          navigate('/profile/2fa-verify', {
+            state: {
+              mode: 'profile',
+              updateData,
+              hasAvatar: !!avatarFile,
+              avatarFile
+            }
+          });
+        } else {
+          throw err;
+        }
+      }
     } catch (err) {
       console.error('Error updating profile:', err);
       setError(err.response?.data?.message || 'Failed to update profile');
@@ -168,6 +264,8 @@ const Profile = () => {
       setSaving(false);
     }
   };
+
+
 
   const handleCancel = () => {
     setEditMode(false);
@@ -186,17 +284,33 @@ const Profile = () => {
       setSaving(true);
       setError(null);
       
-      await profileAPI.changePassword(passwordData.currentPassword, passwordData.newPassword);
-      
-      setPasswordDialog(false);
-      setPasswordData({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
-      });
-      setSuccess('Password changed successfully');
-      
-      setTimeout(() => setSuccess(null), 3000);
+      // First attempt to change password without 2FA
+      try {
+        await profileAPI.changePassword(passwordData.currentPassword, passwordData.newPassword);
+        
+        // If successful, reset the form and show success
+        setPasswordDialog(false);
+        setPasswordData({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        });
+        setSuccess('Password changed successfully');
+        setTimeout(() => setSuccess(null), 3000);
+      } catch (err) {
+        // If 2FA is required, redirect to 2FA page
+        if (err.response?.data?.requires2FA) {
+          navigate('/profile/2fa-verify', {
+            state: {
+              mode: 'password',
+              currentPassword: passwordData.currentPassword,
+              newPassword: passwordData.newPassword
+            }
+          });
+        } else {
+          throw err;
+        }
+      }
     } catch (err) {
       console.error('Error changing password:', err);
       setError(err.response?.data?.message || 'Failed to change password');
@@ -218,12 +332,149 @@ const Profile = () => {
     }
   };
 
+  const handleLogoutClick = () => {
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    logout();
+    navigate('/login');
+    setShowLogoutModal(false);
+  };
+
   const getAvatarUrl = () => {
     if (avatarPreview) return avatarPreview;
     if (profile?.profile?.avatar) {
       return profileAPI.getAvatar(profile.profile.avatar.split('/').pop());
     }
     return null;
+  };
+
+  // 2FA handlers
+  const handle2FASetup = async () => {
+    setTwoFALoading(true);
+    setTwoFAError('');
+    try {
+      const res = await twoFAAPI.setup();
+      setTwoFASetup(res.data); // { qr, secret }
+    } catch (err) {
+      setTwoFAError('Failed to start 2FA setup.');
+    } finally {
+      setTwoFALoading(false);
+    }
+  };
+
+  const handle2FAVerify = async () => {
+    if (!twoFACode) {
+      setTwoFAError('Please enter the 2FA code');
+      return;
+    }
+
+    setTwoFALoading(true);
+    setTwoFAError('');
+    
+    try {
+      // Handle 2FA setup verification
+      if (twoFASetup) {
+        await twoFAAPI.verify(twoFACode, twoFASetup.secret);
+        await twoFAAPI.enable(twoFASetup.secret);
+        setTwoFAEnabled(true);
+        try {
+          const refreshed = await profileAPI.getProfile();
+          updateUser(refreshed.data);
+        } catch {}
+        setTwoFASetup(null);
+        setTwoFACode('');
+      } 
+      // Handle profile update verification
+      else if (pendingUpdateData) {
+        try {
+          const updateData = {
+            ...pendingUpdateData,
+            twoFACode: twoFACode
+          };
+          
+          // First update the profile with 2FA code
+          const response = await profileAPI.updateProfile(updateData);
+          
+          // Then handle avatar upload if there's a new avatar
+          let updatedAvatar = null;
+          if (avatarFile) {
+            const avatarResponse = await profileAPI.uploadAvatar(avatarFile, twoFACode);
+            updatedAvatar = avatarResponse.data.avatar;
+          }
+          
+          // Update the profile with the new avatar URL if it was uploaded
+          const updatedProfile = {
+            ...response.data,
+            profile: {
+              ...response.data.profile,
+              ...(updatedAvatar && { avatar: updatedAvatar })
+            }
+          };
+          
+          setProfile(updatedProfile);
+          updateUser(updatedProfile);
+          
+          setEditMode(false);
+          setAvatarFile(null);
+          setAvatarPreview(null);
+          setShow2FAModal(false);
+          setTwoFACode('');
+          setSuccess('Profile updated successfully');
+          
+          setTimeout(() => setSuccess(null), 3000);
+        } catch (err) {
+          console.error('Error updating profile with 2FA:', err);
+          throw err;
+        }
+      }
+      // Handle password change with 2FA
+      else if (passwordData.currentPassword && passwordData.newPassword) {
+        // Include 2FA code in the password change request
+        const response = await profileAPI.changePassword(
+          passwordData.currentPassword, 
+          passwordData.newPassword,
+          twoFACode
+        );
+        
+        // Reset form and show success
+        setPasswordDialog(false);
+        setPasswordData({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        });
+        setShow2FAModal(false);
+        setSuccess('Password changed successfully');
+        setTwoFACode('');
+        
+        setTimeout(() => setSuccess(null), 3000);
+      }
+    } catch (err) {
+      console.error('2FA verification failed:', err);
+      setTwoFAError(err.response?.data?.message || 'Invalid 2FA code. Please try again.');
+    } finally {
+      setSaving(false);
+      setTwoFALoading(false);
+    }
+  };
+
+  const handle2FADisable = async () => {
+    setTwoFALoading(true);
+    setTwoFAError('');
+    try {
+      await twoFAAPI.disable();
+      setTwoFAEnabled(false);
+      try {
+        const refreshed = await profileAPI.getProfile();
+        updateUser(refreshed.data);
+      } catch {}
+    } catch (err) {
+      setTwoFAError('Failed to disable 2FA.');
+    } finally {
+      setTwoFALoading(false);
+    }
   };
 
   if (loading) {
@@ -512,6 +763,53 @@ const Profile = () => {
             </Grid>
           </Paper>
         </Grid>
+
+        {/* 2FA Settings */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3, mt: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Two-Factor Authentication (2FA)
+            </Typography>
+            {twoFAEnabled ? (
+              <>
+                <Typography color="success.main" sx={{ mb: 2 }}>2FA is enabled on your account.</Typography>
+                <Button variant="outlined" color="error" onClick={handle2FADisable} disabled={twoFALoading}>
+                  {twoFALoading ? 'Disabling...' : 'Disable 2FA'}
+                </Button>
+              </>
+            ) : twoFASetup ? (
+              <>
+                <Typography sx={{ mb: 2 }}>Scan the QR code below with your Authenticator App (Google Authenticator, Authy, etc.), or enter the secret manually.</Typography>
+                <img src={twoFASetup.qr} alt="2FA QR Code" style={{ marginBottom: 16, width: 180, height: 180 }} />
+                <Typography variant="body2" sx={{ mb: 2 }}>Secret: <b>{twoFASetup.secret}</b></Typography>
+                <TextField
+                  label="Enter 6-digit code"
+                  value={twoFACode}
+                  onChange={e => setTwoFACode(e.target.value)}
+                  sx={{ mb: 2 }}
+                  inputProps={{ maxLength: 6 }}
+                />
+                <div>
+                  <Button variant="contained" onClick={handle2FAVerify} disabled={twoFALoading || twoFACode.length !== 6}>
+                    {twoFALoading ? 'Verifying...' : 'Verify & Enable'}
+                  </Button>
+                  <Button variant="text" onClick={() => setTwoFASetup(null)} sx={{ ml: 2 }} disabled={twoFALoading}>
+                    Cancel
+                  </Button>
+                </div>
+                {twoFAError && <Typography color="error" sx={{ mt: 1 }}>{twoFAError}</Typography>}
+              </>
+            ) : (
+              <>
+                <Typography sx={{ mb: 2 }}>Add an extra layer of security to your account using an Authenticator App.</Typography>
+                <Button variant="contained" onClick={handle2FASetup} disabled={twoFALoading}>
+                  {twoFALoading ? 'Loading...' : 'Enable 2FA'}
+                </Button>
+                {twoFAError && <Typography color="error" sx={{ mt: 1 }}>{twoFAError}</Typography>}
+              </>
+            )}
+          </Paper>
+        </Grid>
       </Grid>
 
       {/* Password Change Dialog */}
@@ -606,6 +904,72 @@ const Profile = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 2FA Verification Modal for Profile Update */}
+      <Dialog 
+        open={show2FAModal} 
+        onClose={() => !saving && setShow2FAModal(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Two-Factor Authentication Required</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" gutterBottom>
+            Please enter the 6-digit verification code from your authenticator app to update your profile.
+          </Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            id="twoFACode"
+            label="Verification Code"
+            type="text"
+            fullWidth
+            variant="outlined"
+            value={twoFACode}
+            onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            error={!!twoFAError}
+            helperText={twoFAError}
+            disabled={saving}
+            inputProps={{
+              inputMode: 'numeric',
+              pattern: '[0-9]*',
+              maxLength: 6
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShow2FAModal(false)} 
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handle2FAVerify} 
+            variant="contained" 
+            color="primary"
+            disabled={!twoFACode || twoFACode.length !== 6 || saving}
+          >
+            {saving ? <CircularProgress size={24} /> : 'Verify & Update'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Modals */}
+      <ConfirmationModal
+        isOpen={showUpdateModal}
+        title="Update Profile"
+        message="Are you sure you want to update your profile?"
+        onConfirm={handleConfirmUpdate}
+        onCancel={() => setShowUpdateModal(false)}
+      />
+      <ConfirmationModal
+        isOpen={showLogoutModal}
+        title="Logout"
+        message="Are you sure you want to logout?"
+        onConfirm={handleConfirmLogout}
+        onCancel={() => setShowLogoutModal(false)}
+      />
     </Container>
   );
 };

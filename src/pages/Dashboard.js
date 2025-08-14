@@ -8,6 +8,7 @@ import {
   Typography,
   Card,
   CardContent,
+  Button,
   IconButton,
   Menu,
   MenuItem,
@@ -28,7 +29,12 @@ import {
   Opacity,
   Air,
   Speed,
-  WbSunny,
+  BatteryFull,
+  VolumeUp,
+  Memory,
+  BrightnessHigh,
+  DevicesOther,
+  Wifi,
   Refresh,
   MoreVert,
   TrendingUp,
@@ -48,11 +54,13 @@ import {
 } from 'recharts';
 import { format, subHours, parseISO } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
-import { environmentAPI } from '../services/api';
+import { environmentAPI, systemAPI } from '../services/api';
 import io from 'socket.io-client';
+import { useNavigate } from 'react-router-dom';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [latestData, setLatestData] = useState(null);
   const [historicalData, setHistoricalData] = useState([]);
   const [stats, setStats] = useState(null);
@@ -60,6 +68,8 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [timeRange, setTimeRange] = useState('24h');
   const [socket, setSocket] = useState(null);
+  const [systemLatest, setSystemLatest] = useState(null);
+  const [devices, setDevices] = useState([]);
   const [anchorEl, setAnchorEl] = useState(null);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [updateIntervalMs, setUpdateIntervalMs] = useState(30000);
@@ -88,13 +98,29 @@ const Dashboard = () => {
       });
     });
 
+    newSocket.on('systemMetrics', (data) => {
+      setSystemLatest(data);
+    });
+    newSocket.on('systemAlerts', () => {
+      // Refresh latest devices list on alert
+      fetchDevices();
+    });
+
     return () => {
       newSocket.close();
     };
   }, []);
 
+  const fetchDevices = async () => {
+    try {
+      const res = await systemAPI.getDevices();
+      setDevices(res.data || []);
+    } catch {}
+  };
+
   useEffect(() => {
     fetchDashboardData({ silent: false });
+    fetchDevices();
   }, [timeRange]);
 
   // Auto update interval handling
@@ -120,7 +146,8 @@ const Dashboard = () => {
     try {
       const results = await Promise.allSettled([
         environmentAPI.getLatestData(),
-        environmentAPI.getStats(timeRange)
+        environmentAPI.getStats(timeRange),
+        systemAPI.getLatest(),
       ]);
 
       // Latest data handling (treat 404 as no data, not an error)
@@ -139,6 +166,10 @@ const Dashboard = () => {
       if (results[1].status === 'fulfilled') {
         setStats(results[1].value.data);
       } else {
+      // System latest
+      if (results[2].status === 'fulfilled') {
+        setSystemLatest(results[2].value.data);
+      }
         // Fallback stats
         setStats({
           avgTemperature: 0,
@@ -402,6 +433,55 @@ const Dashboard = () => {
         </MenuItem>
         <MenuItem onClick={handleLogout}>Logout</MenuItem>
       </Menu>
+      {/* Devices overview */}
+      <Paper sx={{ p: 3, mt: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Devices
+        </Typography>
+        <Grid container spacing={{ xs: 2, md: 3 }}>
+          {devices.map((d) => (
+            <Grid item xs={12} sm={6} md={3} key={d.deviceId}>
+              <AnimatedSensorCard
+                title={d.deviceModel || d.deviceId}
+                value={d.batteryPercent ?? '--'}
+                unit="%"
+                icon={<DevicesOther color="action" />}
+                color="text.primary"
+                subtitle={`Battery • ${d.deviceManufacturer || ''}`}
+              />
+              <Box mt={1} display="flex" gap={1}>
+                <Button size="small" variant="outlined" onClick={() => navigate(`/device/${encodeURIComponent(d.deviceId)}`)}>Open</Button>
+                <Button size="small" variant="outlined" onClick={() => systemAPI.sendCommand(d.deviceId, 'open-task-manager')}>Task Manager</Button>
+              </Box>
+            </Grid>
+          ))}
+          {devices.length === 0 && systemLatest && (
+            <Grid item xs={12} sm={6} md={3} key={systemLatest.deviceId || 'this-device'}>
+              <AnimatedSensorCard
+                title={systemLatest.deviceModel || systemLatest.deviceId || 'This Device'}
+                value={systemLatest.batteryPercent ?? '--'}
+                unit="%"
+                icon={<DevicesOther color="action" />}
+                color="text.primary"
+                subtitle={`Battery • ${systemLatest.deviceManufacturer || ''}`}
+              />
+              <Box mt={1} display="flex" gap={1}>
+                {systemLatest.deviceId && (
+                  <Button size="small" variant="outlined" onClick={() => navigate(`/device/${encodeURIComponent(systemLatest.deviceId)}`)}>Open</Button>
+                )}
+                {systemLatest.deviceId && (
+                  <Button size="small" variant="outlined" onClick={() => systemAPI.sendCommand(systemLatest.deviceId, 'open-task-manager')}>Task Manager</Button>
+                )}
+              </Box>
+            </Grid>
+          )}
+          {devices.length === 0 && !systemLatest && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">No devices yet.</Typography>
+            </Grid>
+          )}
+        </Grid>
+      </Paper>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -529,9 +609,9 @@ const Dashboard = () => {
       {/* System Status */}
       <Paper sx={{ p: 3, mt: 3 }}>
         <Typography variant="h6" gutterBottom>
-          System Status
+          System & Connection Status
         </Typography>
-        <Grid container spacing={2}>
+        <Grid container spacing={{ xs: 2, md: 3 }}>
           <Grid item xs={12} sm={6} md={3}>
             <Box display="flex" alignItems="center" gap={1}>
               <Box
@@ -549,7 +629,7 @@ const Dashboard = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Typography variant="body2">
-              Last Update: {latestData?.timestamp ? format(new Date(latestData.timestamp), 'HH:mm:ss') : '--'}
+              Env Last Update: {latestData?.timestamp ? format(new Date(latestData.timestamp), 'HH:mm:ss') : '--'}
             </Typography>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
@@ -562,8 +642,93 @@ const Dashboard = () => {
               Device: {latestData?.deviceId || 'Unknown'}
             </Typography>
           </Grid>
+          
         </Grid>
       </Paper>
+
+      {systemLatest && (
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            This Device
+          </Typography>
+          <Grid container spacing={{ xs: 2, md: 3 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <div onClick={() => systemLatest?.deviceId && systemAPI.sendCommand(systemLatest.deviceId, 'open-battery-settings')} style={{ cursor: systemLatest?.deviceId ? 'pointer' : 'default' }}>
+                <AnimatedSensorCard
+                  title="Battery"
+                  value={systemLatest?.batteryPercent ?? '--'}
+                  unit="%"
+                  icon={<BatteryFull color="success" />}
+                  color="success.main"
+                  subtitle={systemLatest?.isCharging ? 'Charging' : 'On Battery'}
+                />
+              </div>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <div onClick={() => systemLatest?.deviceId && systemAPI.sendCommand(systemLatest.deviceId, 'open-task-manager')} style={{ cursor: systemLatest?.deviceId ? 'pointer' : 'default' }}>
+                <AnimatedSensorCard
+                  title="CPU Load"
+                  value={systemLatest?.cpuLoadPercent ?? '--'}
+                  unit="%"
+                  icon={<Speed color="info" />}
+                  color="info.main"
+                  subtitle={systemLatest?.uptimeSeconds ? `Uptime: ${Math.floor(systemLatest.uptimeSeconds / 3600)}h` : ''}
+                />
+              </div>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <div onClick={() => systemLatest?.deviceId && systemAPI.sendCommand(systemLatest.deviceId, 'open-task-manager')} style={{ cursor: systemLatest?.deviceId ? 'pointer' : 'default' }}>
+                <AnimatedSensorCard
+                  title="Memory Used"
+                  value={systemLatest?.memoryUsedPercent ?? '--'}
+                  unit="%"
+                  icon={<Memory color="warning" />}
+                  color="warning.main"
+                  subtitle={
+                    typeof systemLatest?.memoryFreeMB === 'number' && typeof systemLatest?.memoryTotalMB === 'number'
+                      ? `${Math.round(systemLatest.memoryTotalMB - systemLatest.memoryFreeMB)}MB / ${systemLatest.memoryTotalMB}MB`
+                      : ''
+                  }
+                />
+              </div>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <div onClick={() => systemLatest?.deviceId && systemAPI.sendCommand(systemLatest.deviceId, 'open-brightness-settings')} style={{ cursor: systemLatest?.deviceId ? 'pointer' : 'default' }}>
+                <AnimatedSensorCard
+                  title="Brightness"
+                  value={systemLatest?.brightnessPercent ?? '--'}
+                  unit="%"
+                  icon={<BrightnessHigh color="secondary" />}
+                  color="secondary.main"
+                />
+              </div>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <div onClick={() => systemLatest?.deviceId && systemAPI.sendCommand(systemLatest.deviceId, 'open-sound-settings')} style={{ cursor: systemLatest?.deviceId ? 'pointer' : 'default' }}>
+                <AnimatedSensorCard
+                  title="Volume"
+                  value={systemLatest?.volumePercent ?? '--'}
+                  unit="%"
+                  icon={<VolumeUp color="primary" />}
+                  color="primary.main"
+                />
+              </div>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <div onClick={() => systemLatest?.deviceId && systemAPI.sendCommand(systemLatest.deviceId, 'open-network-settings')} style={{ cursor: systemLatest?.deviceId ? 'pointer' : 'default' }}>
+                <AnimatedSensorCard
+                  title="Network"
+                  value={systemLatest?.isOnline ? 'Online' : 'Offline'}
+                  unit=""
+                  icon={<Wifi color={systemLatest?.isOnline ? 'success' : 'disabled'} />}
+                  color={systemLatest?.isOnline ? 'success.main' : 'text.secondary'}
+                  subtitle={systemLatest?.networkType || ''}
+                />
+              </div>
+            </Grid>
+          </Grid>
+        </Paper>
+      )}
     </Container>
   );
 };

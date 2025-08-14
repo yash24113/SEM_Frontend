@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -21,6 +21,10 @@ import {
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import OtpModal from '../components/OtpModal';
+import TwoFAModal from '../components/TwoFAModal';
+import api, { authAPI } from '../services/api';
+
+const TWO_FA_TOKEN_KEY = 'twofa_token';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -31,11 +35,35 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [showOtpModal, setShowOtpModal] = useState(false);
+  const [showTwoFAModal, setShowTwoFAModal] = useState(false);
   const [tempEmail, setTempEmail] = useState('');
   const [otpType, setOtpType] = useState('login');
 
-  const { login, error, clearError, applyAuthSession } = useAuth();
+  const { login, error, clearError, applyAuthSession, logout, user } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      let token = localStorage.getItem('token');
+      if (!token) {
+        token = localStorage.getItem('twofa_token');
+      }
+      if (token) {
+        try {
+          const response = await api.verifyToken(token);
+          if (response.data.user) {
+            applyAuthSession(token, response.data.user);
+            navigate('/dashboard');
+          }
+        } catch (error) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('twofa_token');
+        }
+      }
+      setLoading(false);
+    };
+    checkAuth();
+  }, [applyAuthSession, navigate]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -77,20 +105,18 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
-    
+    if (!validateForm()) return;
     setLoading(true);
     try {
       const result = await login(formData.email, formData.password);
-      if (result?.requiresOTP) {
+      if (result?.requires2FA && result?.user?.profile?.twoFAEnabled) {
+        setTempEmail(formData.email);
+        setShowTwoFAModal(true);
+      } else if (result?.requiresOTP) {
         setTempEmail(formData.email);
         setOtpType(result?.type || 'login');
         setShowOtpModal(true);
       } else if (result?.token && result?.user) {
-        // In case server ever returns token immediately (not expected now)
         applyAuthSession(result.token, result.user);
         navigate('/dashboard');
       }
@@ -98,6 +124,27 @@ const Login = () => {
       console.error('Login error:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTwoFAVerify = async (code) => {
+    try {
+      // Use correct API endpoint
+      const res = await authAPI.verify2FACode({ email: tempEmail, code });
+      const data = res.data;
+      if (data.token && data.user) {
+        applyAuthSession(data.token, data.user);
+        // Store 2FA session token in localStorage
+        localStorage.setItem(TWO_FA_TOKEN_KEY, data.token);
+        setShowTwoFAModal(false);
+        navigate('/dashboard');
+        return { success: true };
+      } else {
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('2FA verification error:', error);
+      return { success: false };
     }
   };
 
@@ -112,6 +159,16 @@ const Login = () => {
   const handleTogglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
+
+  // In useEffect for logout/redirect in Profile.js, check for 2FA token and clear it on logout
+  useEffect(() => {
+    if (user && user.profile && user.profile.twoFAEnabled) {
+      // Remove 2FA token and logout
+      localStorage.removeItem(TWO_FA_TOKEN_KEY);
+      logout();
+      navigate('/login');
+    }
+  }, [user, logout, navigate]);
 
   return (
     <Container component="main" maxWidth="sm">
@@ -132,8 +189,16 @@ const Login = () => {
             alignItems: 'center',
             width: '100%',
             borderRadius: 2,
+            border: '4px solid',
+            borderImage: 'linear-gradient(270deg, #ff6ec4, #7873f5, #42e695, #ff6ec4) 1',
+            animation: 'borderAnimation 6s linear infinite',
+            '@keyframes borderAnimation': {
+              '0%': { borderImageSource: 'linear-gradient(270deg, #ff6ec4, #7873f5, #42e695, #ff6ec4)' },
+              '100%': { borderImageSource: 'linear-gradient(270deg, #42e695, #ff6ec4, #7873f5, #42e695)' },
+            },
           }}
         >
+          <img src="/logo.jpg" alt="Logo" style={{ width: 80, height: 80, borderRadius: '50%', marginBottom: 16 }} />
           <Typography component="h1" variant="h4" gutterBottom>
             Welcome Back
           </Typography>
@@ -232,6 +297,12 @@ const Login = () => {
         email={tempEmail}
         onVerify={handleOtpVerify}
         type={otpType}
+      />
+      <TwoFAModal
+        open={showTwoFAModal}
+        onClose={() => setShowTwoFAModal(false)}
+        onVerify={handleTwoFAVerify}
+        email={tempEmail}
       />
     </Container>
   );

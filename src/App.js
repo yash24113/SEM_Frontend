@@ -6,8 +6,11 @@ import Dashboard from './pages/Dashboard';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
+import ProfileTwoFAVerify from './pages/ProfileTwoFAVerify';
+import DeviceDetails from './pages/DeviceDetails';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
+import Chatbot from './components/Chatbot/Chatbot';
 
 // Create a theme instance
 const theme = createTheme({
@@ -72,9 +75,20 @@ function App() {
                   <Profile />
                 </ProtectedRoute>
               } />
+              <Route path="/profile/2fa-verify" element={
+                <ProtectedRoute>
+                  <ProfileTwoFAVerify />
+                </ProtectedRoute>
+              } />
+              <Route path="/device/:deviceId" element={
+                <ProtectedRoute>
+                  <DeviceDetails />
+                </ProtectedRoute>
+              } />
               <Route path="/" element={<Navigate to="/dashboard" />} />
             </Routes>
           </HeaderWrapper>
+          <Chatbot />
         </Router>
       </AuthProvider>
     </ThemeProvider>

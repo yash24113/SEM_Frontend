@@ -24,8 +24,34 @@ import {
 } from '@mui/material';
 import { Dashboard as DashboardIcon, Person, Logout, Menu as MenuIcon } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import ConfirmationModal from './ConfirmationModal';
+import { styled } from '@mui/material/styles';
 
 const MotionAppBar = motion(AppBar);
+
+// Utility to get avatar url from user object
+const getUserAvatarUrl = (user) => {
+  if (user?.profile?.avatar) {
+    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+    const filename = user.profile.avatar.split('/').pop();
+    return `${API_BASE_URL}/api/profile/avatar/${filename}`;
+  }
+  return null;
+};
+
+// Add a small green dot for active status on the profile avatar
+const ActiveBadge = styled('span')(({ theme }) => ({
+  position: 'absolute',
+  bottom: 2,
+  right: 2,
+  width: 14,
+  height: 14,
+  backgroundColor: '#44b700',
+  borderRadius: '50%',
+  border: `2px solid ${theme.palette.background.paper}`,
+  boxShadow: '0 0 0 2px #fff',
+  zIndex: 2,
+}));
 
 function Header() {
   const { user, logout } = useAuth();
@@ -35,6 +61,7 @@ function Header() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [anchorEl, setAnchorEl] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const handleOpenUserMenu = (event) => {
     setAnchorEl(event.currentTarget);
@@ -44,10 +71,15 @@ function Header() {
     setAnchorEl(null);
   };
 
-  const handleLogout = async () => {
+  const handleLogoutClick = () => {
     handleCloseUserMenu();
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = async () => {
     await logout();
     navigate('/login');
+    setShowLogoutModal(false);
   };
 
   const isActive = (path) => location.pathname === path;
@@ -59,9 +91,15 @@ function Header() {
   const drawerContent = (
     <Box sx={{ width: 260 }} role="presentation" onClick={toggleDrawer(false)} onKeyDown={toggleDrawer(false)}>
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Avatar sx={{ bgcolor: theme.palette.primary.main }}>
-          {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
-        </Avatar>
+        <Box sx={{ position: 'relative', display: 'inline-block' }}>
+          <Avatar
+            src={getUserAvatarUrl(user) || undefined}
+            sx={{ bgcolor: theme.palette.primary.main }}
+          >
+            {!getUserAvatarUrl(user) && (user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U')}
+          </Avatar>
+          <ActiveBadge />
+        </Box>
         <Box>
           <Typography variant="subtitle1">{user?.name || 'User'}</Typography>
           <Typography variant="caption" sx={{ opacity: 0.7 }}>{user?.email}</Typography>
@@ -89,7 +127,7 @@ function Header() {
       <Divider />
       <List>
         <ListItem disablePadding>
-          <ListItemButton onClick={handleLogout}>
+          <ListItemButton onClick={handleLogoutClick}>
             <ListItemIcon>
               <Logout />
             </ListItemIcon>
@@ -119,7 +157,7 @@ function Header() {
               <MenuIcon />
             </IconButton>
           )}
-          <DashboardIcon />
+          <img src="/logo.jpg" alt="Logo" style={{ width: 56, height: 56, marginRight: 16, borderRadius: '100%', background: 'transparent', boxShadow: 'none' }} />
           <Typography
             variant="h6"
             component={RouterLink}
@@ -162,9 +200,15 @@ function Header() {
 
           <Tooltip title={user?.name || user?.email || 'Account'}>
             <IconButton onClick={handleOpenUserMenu} sx={{ p: 0 }}>
-              <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
-                {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
-              </Avatar>
+              <Box sx={{ position: 'relative', display: 'inline-block' }}>
+                <Avatar
+                  src={getUserAvatarUrl(user) || undefined}
+                  sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}
+                >
+                  {!getUserAvatarUrl(user) && (user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U')}
+                </Avatar>
+                <ActiveBadge />
+              </Box>
             </IconButton>
           </Tooltip>
           <Menu
@@ -179,7 +223,7 @@ function Header() {
               <Person fontSize="small" style={{ marginRight: 8 }} />
               <Typography textAlign="center">Profile</Typography>
             </MenuItem>
-            <MenuItem onClick={handleLogout}>
+            <MenuItem onClick={handleLogoutClick}>
               <Logout fontSize="small" style={{ marginRight: 8 }} />
               <Typography textAlign="center">Logout</Typography>
             </MenuItem>
@@ -190,8 +234,11 @@ function Header() {
         <Box sx={{ display: { xs: 'flex', md: 'none' }, alignItems: 'center', gap: 1 }}>
           <Tooltip title={user?.name || user?.email || 'Account'}>
             <IconButton onClick={handleOpenUserMenu} sx={{ p: 0 }}>
-              <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
-                {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+              <Avatar
+                src={getUserAvatarUrl(user) || undefined}
+                sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}
+              >
+                {!getUserAvatarUrl(user) && (user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U')}
               </Avatar>
             </IconButton>
           </Tooltip>
@@ -207,7 +254,7 @@ function Header() {
               <Person fontSize="small" style={{ marginRight: 8 }} />
               <Typography textAlign="center">Profile</Typography>
             </MenuItem>
-            <MenuItem onClick={handleLogout}>
+            <MenuItem onClick={handleLogoutClick}>
               <Logout fontSize="small" style={{ marginRight: 8 }} />
               <Typography textAlign="center">Logout</Typography>
             </MenuItem>
@@ -223,6 +270,14 @@ function Header() {
       >
         {drawerContent}
       </Drawer>
+
+      <ConfirmationModal
+        isOpen={showLogoutModal}
+        title="Logout"
+        message="Are you sure you want to logout?"
+        onConfirm={handleConfirmLogout}
+        onCancel={() => setShowLogoutModal(false)}
+      />
     </MotionAppBar>
   );
 }

@@ -146,7 +146,8 @@ const Register = () => {
   return (
     <Container component="main" maxWidth="sm">
       <Box sx={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <Paper elevation={3} sx={{ padding: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', borderRadius: 2 }}>
+        <Paper elevation={3} sx={{ padding: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', borderRadius: 2, border: '4px solid', borderImage: 'linear-gradient(270deg, #ff6ec4, #7873f5, #42e695, #ff6ec4) 1', animation: 'borderAnimation 6s linear infinite', '@keyframes borderAnimation': { '0%': { borderImageSource: 'linear-gradient(270deg, #ff6ec4, #7873f5, #42e695, #ff6ec4)' }, '100%': { borderImageSource: 'linear-gradient(270deg, #42e695, #ff6ec4, #7873f5, #42e695)' }, }, }}>
+          <img src="/logo.jpg" alt="Logo" style={{ width: 80, height: 80, borderRadius: '50%', marginBottom: 16 }} />
           <Typography component="h1" variant="h4" gutterBottom>
             Create Account
           </Typography>

@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI } from '../services/api';
 
 const AuthContext = createContext();
+const TWO_FA_TOKEN_KEY = 'twofa_token';
+const TOKEN_EXPIRY_KEY = 'token_expiry';
+const TOKEN_REFRESH_INTERVAL = 30000; // 30 seconds
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -19,15 +22,21 @@ export const AuthProvider = ({ children }) => {
   // Check if user is authenticated on app load
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem(TWO_FA_TOKEN_KEY);
       if (token) {
         try {
-          const response = await authAPI.verifyToken();
-          setUser(response.data.user);
+          const response = await authAPI.verifyToken(token);
+          if (response.data.user) {
+            setUser(response.data.user);
+          }
         } catch (error) {
           console.error('Token verification failed:', error);
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+          // Only clear auth if token is invalid, not just expired
+          if (error.response?.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem(TWO_FA_TOKEN_KEY);
+            setUser(null);
+          }
         }
       }
       setLoading(false);
@@ -69,7 +78,8 @@ export const AuthProvider = ({ children }) => {
       console.error('Logout error:', error);
     } finally {
       localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      localStorage.removeItem(TWO_FA_TOKEN_KEY);
+      localStorage.removeItem(TOKEN_EXPIRY_KEY);
       setUser(null);
       setError(null);
     }
@@ -82,7 +92,9 @@ export const AuthProvider = ({ children }) => {
 
   const applyAuthSession = (token, authenticatedUser) => {
     if (token && authenticatedUser) {
+      // Set token in both locations for compatibility
       localStorage.setItem('token', token);
+      localStorage.setItem(TWO_FA_TOKEN_KEY, token);
       localStorage.setItem('user', JSON.stringify(authenticatedUser));
       setUser(authenticatedUser);
     }
