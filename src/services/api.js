@@ -126,7 +126,7 @@ export const profileAPI = {
 
 // 2FA API
 export const twoFAAPI = {
-  setup: () => api.post('/2fa/setup'),
+  setup: () => api.post('/api/2fa/setup'),
   verify: (code, secret) => api.post('/2fa/verify', { code, secret }),
   enable: (secret) => api.post('/2fa/enable', { secret }),
   disable: () => api.post('/2fa/disable'),
